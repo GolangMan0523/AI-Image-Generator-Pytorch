@@ -1,0 +1,85 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: sc-worker
+  namespace: sc-worker
+  labels:
+    app: sc-worker
+spec:
+  progressDeadlineSeconds: 1200
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 2
+      maxSurge: 0
+  selector:
+    matchLabels:
+      app: sc-worker
+  template:
+    metadata:
+      labels:
+        app: sc-worker
+    spec:
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: DoNotSchedule
+        labelSelector:
+          matchLabels:
+            app: sc-worker
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: agentpool
+                operator: In
+                values:
+                - a100
+      containers:
+        - name: sc-worker
+          image: replaceme
+          resources:
+            limits:
+              nvidia.com/gpu: 1
+          volumeMounts:
+          - mountPath: "/app/data"
+            name: data-volume
+          imagePullPolicy: "IfNotPresent"
+          ports:
+            - containerPort: 13339
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 13339
+            initialDelaySeconds: 300
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 13339
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          envFrom:
+          - secretRef:
+              name: sc-worker
+          env:
+            - name: WORKER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+      volumes:
+        - name: data-volume
+          ephemeral:
+            volumeClaimTemplate:
+              metadata:
+                labels:
+                  type: data-volume
+              spec:
+                accessModes: [ "ReadWriteOnce" ]
+                storageClassName: managed-csi-premium
+                resources:
+                  requests:
+                    storage: 256Gi
